@@ -19,9 +19,12 @@ section .data
 	fd db 8 dup(0)             ; Storage for the file descriptor
 	file_size db 8 dup(0)
 	file_buffer_addr db 8 dup(0)
+	file_buffer_used_bytes db 8 dup(0)
+	buffer_resize_threshold db 8 dup(0)
 	current_key db 8 dup(0)
 	cursor_collum db 8 dup(0)
-	cursor_line db 8 dub(0)
+	cursor_line db 8 dup(0)
+	cursor_position_on_file db 8 dup(0)
 
 section .text
 	extern write_char_to_stdout
@@ -37,6 +40,7 @@ section .text
 	extern break_line
 	extern convert_num_to_ascii
 	extern write_to_stdout
+	extern heap_buffer_size
 
 	global  _start
 
@@ -59,6 +63,31 @@ _start:
 	jmp .loop
 	jmp  exit_program
 
+move_all_chars_one_to_the_side: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
+	cmp rdx, rsi
+	jg .break
+	mov r15, 0 ; previous_char, starts null
+	mov r14, 0 ;loop_counter
+	mov r12, rsi
+	sub r12, rdx ; buffer_content_size - start_index = remaining_index
+	mov r13, rdx
+	add r13, rdi ;r13 = *current_char
+
+	mov [r13], 0
+	mov r15, [r13]
+	add r13, 1
+	add r14, 1
+
+	.loop:
+	cmp r12, r14
+	je .last_char
+	jg .break
+	add r13, 1
+	add r14, 1
+	.last_char:
+	.break:
+	ret
+	
 
 key_press_handler:
 	call wait_for_input
@@ -73,6 +102,7 @@ key_press_handler:
 	ret
 
 handle_backspace:
+	sub [file_buffer_used_bytes], 1
 
 handle_arrows:
 
@@ -84,7 +114,35 @@ handle_right:
 
 handle_left:
 
-handle_writable_char:
+handle_writable_char: ;receive_writable char on rdi
+	mov r12, rdi
+	add [file_buffer_used_bytes], 1
+	call resize_buffer_if_necessary
+	ret
+
+resize_buffer_if_necessary: 
+	mov rdi, [buffer_resize_threshold]
+	cmp [heap_buffer_size], rdi
+	jge .resize
+	ret
+	.resize:
+	mov rdi, [heap_buffer_size]
+	add rdi, rdi
+	call expand_heap_block
+	mov rdi, [heap_buffer_size]
+	call set_buffer_threshold
+	ret
+
+add_char_on_file_buffer: ; receive_char on rdi, index on rsi
+	mov r13, [file_buffer_addr]
+	add r13, rsi ; add offset
+
+	
+
+set_buffer_threshold: ;receive buffer_size on rdi, and set threshold on var TODO set on buffer creation
+	sub rdi, 100
+	mov [buffer_resize_threashold], rdi
+	ret
 
 	
 wait_for_input:
@@ -93,7 +151,7 @@ wait_for_input:
 	call read_syscall
 	ret
 
-insert_number_of_moves: ; receive str_addr on rdi, number on rsi
+insert_number_of_moves_on_esc: ; receive str_addr on rdi, number on rsi
 	mov r12, rdi
 	mov rdi, rsi
 	call convert_num_to_ascii
@@ -108,7 +166,7 @@ erase_line:
 move_up: ; amount on rdi
 	mov rsi, rdi
 	mov rdi, esc_move_up
-	call insert_number_of_moves
+	call insert_number_of_moves_on_esc
 	mov rdi, esc_move_up
 	call print_str
 	ret
@@ -117,7 +175,7 @@ move_up: ; amount on rdi
 move_down:
 	mov rsi, rdi
 	mov rdi, esc_move_down
-	call insert_number_of_moves
+	call insert_number_of_moves_on_esc
 	mov rdi, esc_move_down
 	call print_str
 	ret
@@ -125,7 +183,7 @@ move_down:
 move_right:
 	mov rsi, rdi
 	mov rdi, esc_move_right
-	call insert_number_of_moves
+	call insert_number_of_moves_on_esc
 	mov rdi, esc_move_right
 	call print_str
 	ret
@@ -133,7 +191,7 @@ move_right:
 move_left:
 	mov rsi, rdi
 	mov rdi, esc_move_left
-	call insert_number_of_moves
+	call insert_number_of_moves_on_esc
 	mov rdi, esc_move_left
 	call print_str
 	ret

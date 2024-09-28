@@ -15,6 +15,8 @@ section .data
 	O_TRUNC  dw 1000        ; truncate file
 	O_APPEND dw 2000        ; append to file
 
+	SEEK_END db 2
+
 	input_char db 100 dup(0)
 	int_specifier db 'int: %i', 10, 0
 	str_specifier db 'int: %s', 10, 0
@@ -182,6 +184,20 @@ open_file_syscall: ; receives file name on rdi and return fd
 	mov     rsi, 0; flags: O_RDONLY (0)
 	syscall ; call kernel
 	ret
+
+lseek_syscall: ;look at the linux ABI
+	mov rax, 8
+	syscall
+
+reset_file_ptr: ;fd on rdi
+	mov rsi, 0
+	mov rdx, [SEEK_END]
+	call lseek_syscall
+	ret
+	
+; insert_char_on_position: ;fd on rdi, receives position on rsi,  
+; 	mov r12, rsi
+; 	call reset_file_ptr
 
 expand_heap_block: ; receive amount of bytes on rdi
 	mov r12, rdi
