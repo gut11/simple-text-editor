@@ -1,3 +1,5 @@
+extern printf
+
 section .data
 	;       modes
 	O_RDONLY db 0           ; read-only

@@ -1,9 +1,8 @@
-compile:
-	%.asm:%.o
-	nasm -f elf64 $(input) $(output)
+compile: 
+	./assemble.sh
 
 link: 
-	ld -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc *.o -o editor.out
+	ld -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc ./build/*.o -o editor.out
 
 run: compile link
 	./editor.out $(args)
