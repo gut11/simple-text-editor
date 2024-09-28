@@ -2,10 +2,10 @@ compile:
 	./assemble.sh
 
 link: 
-	ld -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc ./build/*.o -o editor.out
+	ld -o ./build/editor.out -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc ./build/utils.o ./build/editor.o 
 
 run: compile link
-	./editor.out $(args)
+	./build/editor.out $(args)
 
 clean:
 	rm ./*.o
