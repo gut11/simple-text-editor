@@ -25,6 +25,7 @@ section .data
 	heap_buffer_start_addr db 8 dup(0)
 	break_addr db 8 dup(0)
 	heap_buffer_size db 8 dup(0)
+	line_break db 10, 0
 
 
 section .text
@@ -37,6 +38,14 @@ section .text
 	global exit_program
 	global open_file_syscall
 	global get_file_size
+	global heap_buffer_start_addr
+	global break_addr
+	global heap_buffer_size
+	global read_syscall
+	global alloc_heap_block
+	global break_line
+	global convert_num_to_ascii
+	global write_to_stdout
 
 
 exit_program:
@@ -63,6 +72,70 @@ write_to_stdout: ;length rdx, addr on rsi
 	mov rax, 1
 	mov rdi, 1
 	syscall ; result at rax
+	ret
+
+break_line: 
+	mov rdx, 2
+	mov rsi, line_break
+	mov rax, 1
+	mov rdi, 1
+	syscall ; result at rax
+	ret
+
+convert_num_to_ascii: ; receive num on rdi
+	cmp rdi, 48
+	je .0
+	cmp rdi, 49
+	je .1
+	cmp rdi, 50
+	je .2
+	cmp rdi, 51
+	je .3
+	cmp rdi, 52
+	je .4
+	cmp rdi, 53
+	je .5
+	cmp rdi, 54
+	je .6
+	cmp rdi, 55
+	je .7
+	cmp rdi, 56
+	je .8
+	cmp rdi, 57
+	je .9
+
+	ret ; should never occur
+	.0:
+	mov rax, 48
+	jmp .ret
+	.1:
+	mov rax, 49
+	jmp .ret
+	.2:
+	mov rax, 50
+	jmp .ret
+	.3:
+	mov rax, 51
+	jmp .ret
+	.4:
+	mov rax, 52
+	jmp .ret
+	.5:
+	mov rax, 53
+	jmp .ret
+	.6:
+	mov rax, 54
+	jmp .ret
+	.7:
+	mov rax, 55
+	jmp .ret
+	.8:
+	mov rax, 56
+	jmp .ret
+	.9:
+	mov rax, 57
+	jmp .ret
+	.ret:
 	ret
 
 get_argc: ;working
@@ -134,6 +207,10 @@ alloc_heap_block: ;  receive amount of bytes on rdi and expand program break
 	mov [heap_buffer_size], rax
 	mov rax, [break_addr]
 	ret
+
+read_syscall: ; fd on rdi, buf_addr on rsi and num of bytes on rdx
+	mov rax, 0
+	syscall
 
 brk_syscall: ; receive addrss to ask on rdi
 	mov rax, 12
