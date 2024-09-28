@@ -1,5 +1,6 @@
 compile:
-	nasm -f elf64 *.asm -o editor.o
+	%.asm:%.o
+	nasm -f elf64 $(input) $(output)
 
 link: 
 	ld -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc *.o -o editor.out
