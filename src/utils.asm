@@ -22,6 +22,9 @@ section .data
 	argv0_length db 4 dup(0)
 	argv1 db 8 dup(0)
 	argv1_length db 4 dup(0)
+	heap_buffer_start_addr db 8 dup(0)
+	break_addr db 8 dup(0)
+	heap_buffer_size db 8 dup(0)
 
 
 section .text
@@ -101,38 +104,43 @@ get_file_size: ; receive file descriptor on rdi, returns file_size
 	syscall 
 	ret
 
-expand_heap_block:
-	
-
-alloc_heap_block: ;Receive number of bytes on rdi, allocate with mmap, returns address
-	mov rsi, rdi ;insert param num bytes on rsi	
-	mov rax, 9 ;mmap syscall number
-	mov rdi, 0 ;null for address so kernel can choose address
-	mov rdx, 0x0000000000000111 ; flags of read write and execute permission
-	mov r10, 0x0000000000000020 ; Anonymous flag for not linking memory to any file
-	syscall
-	ret
-
 open_file_syscall: ; receives file name on rdi and return fd
 	mov     rax, 2; syscall number for open (2)
 	mov     rsi, 0; flags: O_RDONLY (0)
 	syscall ; call kernel
 	ret
 
-	; get_str_len:
-	; xor rax, rax; Clear rax (set length to 0)
-	; xor r10, r10; Clear r10 (index)
-	
-	; loop_start:
-	; cmp byte [rdi + r10], 0; Compare byte at (rdi + r10) with 0
-	; je break; Jump to break if it is 0
-	; inc rax; Increment rax (length)
-	; inc r10; Increment index
-	; jmp loop_start; Jump back to the start of the loop
-	
-	; break:
-	; ret; Return with length in rax
+expand_heap_block: ; receive amount of bytes on rdi
+	mov r12, rdi
+	add rdi, [break_addr] ; new_address
+	call brk_syscall
+	mov [break_addr], rax
+	sub rax, [heap_buffer_start_addr] 
+	add rax, 1
+	mov [heap_buffer_size], rax
+	mov rax, [break_addr]
+	ret
 
-	; paddd xmm0, [rsp]
-	; MOVAPS xmm1, xmm2
-	; movaps xmm1, [rsp - 1]
+alloc_heap_block: ;  receive amount of bytes on rdi and expand program break
+	mov r12, rdi
+	call get_current_break
+	mov [heap_buffer_start_addr], rax
+	add rax, r12; current_break + amount_of_bytes = new_break_addr
+	mov rdi, rax
+	call brk_syscall
+	mov [break_addr], rax
+	sub rax, [heap_buffer_start_addr] ;buffer_start - new_break = size
+	add rax, 1
+	mov [heap_buffer_size], rax
+	mov rax, [break_addr]
+	ret
+
+brk_syscall: ; receive addrss to ask on rdi
+	mov rax, 12
+	syscall
+	ret
+
+get_current_break:
+	mov rdi, 0
+	call brk_syscall
+	ret

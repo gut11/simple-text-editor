@@ -6,7 +6,7 @@ section .data
 	extern argv0
 	fd dq 8 dup(0)             ; Storage for the file descriptor
 	esc_clear_screen db 0x1b, 'c', 0
-	current_buffer_size db 8 dup(0)
+	file_size db 8 dup(0)
 
 section .text
 	extern write_char_to_stdout
@@ -36,7 +36,11 @@ open_file_in_editor: ; file name on rdi
 	call open_file_syscall
 	mov [fd], rax
 	call get_file_size	
-	mov [current_buffer_size], rax
+	mov [file_size], rax
+
+
+allocate_file_size_times_two:
+	
 	
 
 refresh_screen: ;receives new content on rdi
