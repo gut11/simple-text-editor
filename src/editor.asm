@@ -6,6 +6,7 @@ section .data
 	extern argv0
 
 	backspace db 8,0
+	open_bracket db 0x5b, 0
 
 	esc_move_home db 0x1b, '[H', 0
 	esc_clear_screen db 0x1b, 'c', 0
@@ -18,7 +19,7 @@ section .data
 	fd db 8 dup(0)             ; Storage for the file descriptor
 	file_size db 8 dup(0)
 	file_buffer_addr db 8 dup(0)
-	current_key db 0
+	current_key db 8 dup(0)
 	cursor_collum db 8 dup(0)
 	cursor_line db 8 dub(0)
 
@@ -61,9 +62,19 @@ _start:
 
 key_press_handler:
 	call wait_for_input
-	cmp rax, 8
+	mov rax, current_key
+	cmp byte al, 8 ;backspace byte
+	jne handle_writable_char
+	add al, 1
+	cmp byte al, [open_bracket]
+	jne handle_backspace;
+	cmp byte al, 0x1b
+	jne 
+	ret
 
 handle_backspace:
+
+handle_arrows:
 
 handle_up:
 
@@ -73,10 +84,12 @@ handle_right:
 
 handle_left:
 
+handle_writable_char:
+
 	
 wait_for_input:
 	mov rdi, 0
-	mov rsi, 1
+	mov rsi, current_key
 	call read_syscall
 	ret
 
