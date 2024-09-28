@@ -1,5 +1,7 @@
+extern printf
+
 section .data
-	; modes
+	;       modes
 	O_RDONLY db 0           ; read-only
 	O_WRONLY db 1           ; write-only
 	O_RDWR   db 2           ; read and write
@@ -9,60 +11,145 @@ section .data
 	O_TRUNC  dw 1000        ; truncate file
 	O_APPEND dw 2000        ; append to file
 
-    filename db 'myfile.txt', 0      ; Null-terminated string for the filename
+	file_path db 1000 dup(0); Null-terminated string for the filename
 	input_char db 0
-    file_descriptor dq 0              ; Storage for the file descriptor
+	int_specifier db 'int: %i', 10, 0
+	str_specifier db 'int: %s', 10, 0
+	file_path_str_size db 8 dup(0)
+	argv0 db 8 dup(0)
+	argv1 db 8 dup(0)
+	file_descriptor dq 0              ; Storage for the file descriptor
 
 section .text
-    global _start
+	global  _start
 
 _start:
-	jmp read_char_input
-	jmp write_char_to_stdout
-	jmp exit_program
-
-
+	call read_args
+	call get_absolute_file_path_size
+	mov rdi, [argv1]
+	call print_str
+	AND  rsp, 0xFFFFFFFFFFFFFFF0
+	; call print_int
+	jmp  exit_program
 
 exit_program:
-    mov rax, 60                 ; syscall number for exit (60)
-    xor rdi, rdi                ; exit code 0
-    syscall                     ; call kernel
+	mov     rax, 60; syscall number for exit (60)
+	mov     rdi, 0
+	syscall ; call kernel
 
 read_char_input:
 	mov rax, 0
 	mov rdi, 0
 	mov rsi, input_char
 	mov rdx, 1
-	syscall ; result at rax
-	mov [input_char] rax
+	syscall
+	ret
+
+print_str: ;receive str addr on rdi
+	mov r12, rdi
+	.loop_start:
+	cmp byte [r12], 0
+	je .break
+	mov r13, [r12]
+	mov [input_char], r13
+	call write_char_to_stdout
+	add r12, 1
+	jmp .loop_start
+	.break:
+	mov [input_char], 10
+	call write_char_to_stdout
+	ret
+
+
+print_int: ;receive int on rdi and print with printf
+	sub rsp, 8
+	mov rsi, [file_path_str_size]
+	mov rdi, int_specifier
+	call printf
+	ret
 
 write_char_to_stdout:
-	mov rax, 1
-	mov rdi, 1
-	mov rsi, input_char
-	mov rdx, 1
+	mov     rax, 1
+	mov     rdi, 1
+	mov     rsi, input_char
+	mov     rdx, 1
 	syscall ; result at rax
+	ret
 
-read_file_path_arg:
-	
+get_argc: ;working
+	mov  rdi, int_specifier
+	mov  rax, [rsp + 16]; argc
+	pop  rbp
+	ret
+
+read_args: ; for some reason argc has 8 bytes
+	mov rax, [rsp + 16]
+	; add rax, 12 ; get to argv[0]
+	mov [argv0], rax 
+	; add rax, 8 ; get to argv[1]
+	mov rax, [rsp + 24]
+	mov [argv1], rax
+	ret
+
+get_file_path_size:
+	mov  rdi, [argv0]; argv[0]
+	call get_str_length
+	mov  r12, rax ; store size
+	mov  rdi, [argv1]; argv[1]
+	call get_str_length
+	add  rax, r12
+	mov  word [file_path_str_size], eax
+	ret
+
+get_file_size: ; receive file descriptor on rdi, returns file_size
+	mov rax, 8 ;fseek syscall
+	mov rsi, 0
+	mov rdx, 2 ; seek_end macro value
+	syscall 
+	ret
+
+
+alloc: ;Receive number of bytes on rdi, allocate with mmap, returns address
+	mov rsi, rdi ;insert param num bytes on rsi	
+	mov rax, 9 ;mmap syscall number
+	mov rdi, 0 ;null for address so kernel can choose address
+	mov rdx, 0x0000000000000111 ; flags of read write and execute permission
+	mov r10, 0x0000000000000020 ; Anonymous flag for not linking memory to any file
+	syscall
+	ret
+
+
+get_str_length: ;receive string addr on rdi
+	mov rax, 0
+.loop_start:
+	cmp byte [rdi], 0
+	je  .break
+	add rdi, 1
+	add rax, 1
+	jmp .loop_start
+.break:
+	ret
 
 open_file:
-    mov rax, 2                  ; syscall number for open (2)
-    lea rdi, [filename]         ; pointer to the filename
-    mov rsi, 0                  ; flags: O_RDONLY (0)
-    syscall                     ; call kernel
+	mov     rax, 2; syscall number for open (2)
+	lea     rdi, [file_path]; pointer to the filename
+	mov     rsi, 0; flags: O_RDONLY (0)
+	syscall ; call kernel
 
+	; get_str_len:
+	; xor rax, rax; Clear rax (set length to 0)
+	; xor r10, r10; Clear r10 (index)
+	
+	; loop_start:
+	; cmp byte [rdi + r10], 0; Compare byte at (rdi + r10) with 0
+	; je break; Jump to break if it is 0
+	; inc rax; Increment rax (length)
+	; inc r10; Increment index
+	; jmp loop_start; Jump back to the start of the loop
+	
+	; break:
+	; ret; Return with length in rax
 
-; get_str_len:
-;     xor rax, rax            ; Clear rax (set length to 0)
-;     xor r10, r10            ; Clear r10 (index)
-;
-; loop_start:
-;     cmp byte [rdi + r10], 0 ; Compare byte at (rdi + r10) with 0
-;     je break                ; Jump to break if it is 0
-;     inc rax                 ; Increment rax (length)
-;     inc r10                 ; Increment index
-;     jmp loop_start          ; Jump back to the start of the loop
-;
-; break:
-;     ret                     ; Return with length in rax
+	; paddd xmm0, [rsp]
+	; MOVAPS xmm1, xmm2
+	; movaps xmm1, [rsp - 1]
