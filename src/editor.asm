@@ -41,10 +41,15 @@ section .text
 	extern convert_num_to_ascii
 	extern write_to_stdout
 	extern heap_buffer_size
+	extern expand_heap_block
+	extern canonical_off
+	extern echo_off
 
 	global  _start
 
 _start:
+	call canonical_off
+	call echo_off
 	call clear_screen
 	call read_args
 	call get_file_path_size
@@ -60,10 +65,12 @@ _start:
 	mov rsi, 0
 	call write_to_stdout
 	.loop:
+	call wait_for_input
+	call key_press_handler
 	jmp .loop
 	jmp  exit_program
 
-move_all_chars_one_to_the_side: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
+move_chars_one_position_right: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
 	cmp rdx, rsi
 	jg .break
 	mov r15, 0 ; previous_char, starts null
@@ -73,51 +80,89 @@ move_all_chars_one_to_the_side: ;*buffer on rdi, buffer_content_size on rsi, sta
 	mov r13, rdx
 	add r13, rdi ;r13 = *current_char
 
-	mov [r13], 0
-	mov r15, [r13]
-	add r13, 1
-	add r14, 1
-
 	.loop:
 	cmp r12, r14
-	je .last_char
 	jg .break
+
+	mov rbp, [r13] ;temp_var for current_char
+	mov [r13], r15 ; substitute_current_char for old
+	mov r15, rbp ; change old previous_char for new one
+
 	add r13, 1
 	add r14, 1
-	.last_char:
+	jp .loop
+
 	.break:
 	ret
-	
 
-key_press_handler:
-	call wait_for_input
+insert_new_char_on_buffer: ;receive char to insert on rdi
+	push rdi
+	mov rdi, file_buffer_addr
+	mov rsi, [file_buffer_used_bytes]
+	mov rdx, [cursor_position_on_file]
+	call move_chars_one_position_right
+	mov r12, file_buffer_addr 
+	add r12, [cursor_position_on_file]
+	pop r13
+	mov [r12], r13 ;insert char on buffer
+	ret
+
+key_press_handler: ;receive_input on rax
 	mov rax, current_key
 	cmp byte al, 8 ;backspace byte
 	jne handle_writable_char
 	add al, 1
 	cmp byte al, [open_bracket]
+	mov byte dil, al
 	jne handle_backspace;
-	cmp byte al, 0x1b
-	jne 
+	je handle_arrows 
 	ret
 
 handle_backspace:
-	sub [file_buffer_used_bytes], 1
+	mov r12, rdi
+	sub byte [file_buffer_used_bytes], 1
+	call render_screen
+	ret
 
-handle_arrows:
+handle_arrows: ;;receive arrow on open bracket byte on rdi
+	add rdi, 2 ; move to letter
+	cmp rdi, 'A'
+	call handle_up
+	cmp rdi, 'B'
+	call handle_down
+	cmp rdi, 'C'
+	call handle_right
+	cmp rdi, 'D'
+	call handle_left
+	ret
 
 handle_up:
+	mov rdi, 1
+	call move_up
+	ret
 
 handle_down:
+	mov rdi, 1
+	call move_down
+	ret
 
 handle_right:
+	mov rdi, 1
+	call move_right
+	ret
 
 handle_left:
+	mov rdi, 1
+	call move_left
+	ret
 
 handle_writable_char: ;receive_writable char on rdi
-	mov r12, rdi
-	add [file_buffer_used_bytes], 1
+	push rdi
+	add byte [file_buffer_used_bytes], 1
 	call resize_buffer_if_necessary
+	pop rdi
+	call insert_new_char_on_buffer
+	call render_screen
 	ret
 
 resize_buffer_if_necessary: 
@@ -137,15 +182,12 @@ add_char_on_file_buffer: ; receive_char on rdi, index on rsi
 	mov r13, [file_buffer_addr]
 	add r13, rsi ; add offset
 
-	
-
 set_buffer_threshold: ;receive buffer_size on rdi, and set threshold on var TODO set on buffer creation
 	sub rdi, 100
-	mov [buffer_resize_threashold], rdi
+	mov [buffer_resize_threshold], rdi
 	ret
 
-	
-wait_for_input:
+wait_for_input: ;fill current_key buffer
 	mov rdi, 0
 	mov rsi, current_key
 	call read_syscall
@@ -208,7 +250,10 @@ clear_screen:
 
 render_screen:
 	call clear_screen
-	
+	mov rsi, file_buffer_addr
+	mov rdx,file_buffer_used_bytes
+	call write_to_stdout
+	ret
 	
 open_file_in_editor: ; file name on rdi
 	call open_file_syscall

@@ -48,6 +48,7 @@ section .text
 	global break_line
 	global convert_num_to_ascii
 	global write_to_stdout
+	global expand_heap_block
 
 
 exit_program:
