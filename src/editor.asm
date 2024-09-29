@@ -48,22 +48,26 @@ section .text
 	global  _start
 
 _start:
+	; call clear_screen
+	; call read_args
+	; call get_file_path_size
+	; mov rdi, [argv1]
+	; call print_str
+	; call break_line
+	; AND  rsp, 0xFFFFFFFFFFFFFFF0
+	; mov edi, [argv1_length]
+	; call print_int
+	; mov rdi, backspace
+	; call print_str
+	; mov rdi, 1
+	; mov rsi, 0
+	; call write_to_stdout
 	call canonical_off
 	call echo_off
 	call clear_screen
 	call read_args
-	call get_file_path_size
 	mov rdi, [argv1]
-	call print_str
-	call break_line
-	AND  rsp, 0xFFFFFFFFFFFFFFF0
-	mov edi, [argv1_length]
-	call print_int
-	mov rdi, backspace
-	call print_str
-	mov rdi, 1
-	mov rsi, 0
-	call write_to_stdout
+	call open_file_in_editor
 	.loop:
 	call wait_for_input
 	call key_press_handler
@@ -261,6 +265,8 @@ open_file_in_editor: ; file name on rdi
 	call get_file_size	
 	mov [file_size], rax
 	call allocate_file_size_times_two
+	mov rdi, [heap_buffer_size]
+	call set_buffer_threshold
 	call insert_file_content_on_buffer
 	ret
 
