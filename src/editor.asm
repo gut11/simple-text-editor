@@ -68,9 +68,10 @@ _start:
 	call read_args
 	mov rdi, [argv1]
 	call open_file_in_editor
+	call render_screen
 	.loop:
-	call wait_for_input
-	call key_press_handler
+	; call wait_for_input
+	; call key_press_handler
 	jmp .loop
 	jmp  exit_program
 
