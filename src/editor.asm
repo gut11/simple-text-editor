@@ -9,6 +9,7 @@ section .data
 	open_bracket db 0x5b, 0
 
 	esc_move_home db 0x1b, '[H', 0
+	esc_cursor_absolute_position db 0x1b, '[#;#H', 0
 	esc_clear_screen db 0x1b, 'c', 0
 	esc_move_up db 0x1b, '[#A', 0 ;# is number of lines
 	esc_move_down db 0x1b, '[#B', 0
@@ -21,6 +22,7 @@ section .data
 	file_buffer_addr db 8 dup(0)
 	file_buffer_used_bytes db 8 dup(0)
 	buffer_resize_threshold db 8 dup(0)
+	min_initial_allocation dq 4096
 	current_key db 8 dup(0)
 	cursor_collum db 8 dup(0)
 	cursor_line db 8 dup(0)
@@ -44,6 +46,8 @@ section .text
 	extern expand_heap_block
 	extern canonical_off
 	extern echo_off
+	extern heap_buffer_start_addr
+	extern reset_file_pointer_to_start
 
 	global  _start
 
@@ -69,9 +73,10 @@ _start:
 	mov rdi, [argv1]
 	call open_file_in_editor
 	call render_screen
+	call move_home
 	.loop:
-	; call wait_for_input
-	; call key_press_handler
+	call wait_for_input
+	call key_press_handler
 	jmp .loop
 	jmp  exit_program
 
@@ -86,34 +91,34 @@ move_chars_one_position_right: ;*buffer on rdi, buffer_content_size on rsi, star
 	add r13, rdi ;r13 = *current_char
 
 	.loop:
-	cmp r12, r14
+	cmp r14, r12
 	jg .break
 
-	mov rbp, [r13] ;temp_var for current_char
-	mov [r13], r15 ; substitute_current_char for old
-	mov r15, rbp ; change old previous_char for new one
+	mov byte dl, [r13] ;temp_var for current_char
+	mov byte [r13], r15b ; substitute_current_char by old
+	mov byte r15b, dl ; change old previous_char for new one
 
 	add r13, 1
 	add r14, 1
-	jp .loop
+	jmp .loop
 
 	.break:
 	ret
 
 insert_new_char_on_buffer: ;receive char to insert on rdi
 	push rdi
-	mov rdi, file_buffer_addr
+	mov rdi, [file_buffer_addr]
 	mov rsi, [file_buffer_used_bytes]
 	mov rdx, [cursor_position_on_file]
 	call move_chars_one_position_right
-	mov r12, file_buffer_addr 
+	mov r12, [file_buffer_addr]
 	add r12, [cursor_position_on_file]
 	pop r13
-	mov [r12], r13 ;insert char on buffer
+	mov byte [r12], r13b ;insert char on buffer
 	ret
 
 key_press_handler: ;receive_input on rax
-	mov rax, current_key
+	mov rax, [current_key]
 	cmp byte al, 8 ;backspace byte
 	jne handle_writable_char
 	add al, 1
@@ -161,18 +166,36 @@ handle_left:
 	call move_left
 	ret
 
-handle_writable_char: ;receive_writable char on rdi
-	push rdi
+handle_writable_char: ; current_key variable on memory
 	add byte [file_buffer_used_bytes], 1
 	call resize_buffer_if_necessary
-	pop rdi
+	mov rdi, [current_key]
 	call insert_new_char_on_buffer
 	call render_screen
 	ret
 
+move_terminal_cursor_to_position:
+	call insert_numbers_on_esc_string
+	mov rdi, esc_cursor_absolute_position
+	call print_str
+	ret
+
+insert_numbers_on_esc_string:
+	mov r12, esc_cursor_absolute_position
+	add r12, 2 ; move to first num place
+	mov rdi, [cursor_line]
+	call convert_num_to_ascii
+	mov byte [r12], al
+	add r12, 2 ;next num
+	mov rdi, [cursor_collum]
+	call convert_num_to_ascii
+	mov byte [r12], al
+	ret
+
+
 resize_buffer_if_necessary: 
 	mov rdi, [buffer_resize_threshold]
-	cmp [heap_buffer_size], rdi
+	cmp [file_buffer_used_bytes], rdi
 	jge .resize
 	ret
 	.resize:
@@ -195,6 +218,7 @@ set_buffer_threshold: ;receive buffer_size on rdi, and set threshold on var TODO
 wait_for_input: ;fill current_key buffer
 	mov rdi, 0
 	mov rsi, current_key
+	mov rdx, 20 ;read everything, shouldnt be more than 20 bytes in an input
 	call read_syscall
 	ret
 
@@ -246,6 +270,9 @@ move_left:
 move_home:
 	mov rdi, esc_move_home
 	call print_str
+	mov qword [cursor_position_on_file], 0
+	mov qword [cursor_line], 0
+	mov qword [cursor_collum], 0
 	ret
 
 clear_screen:
@@ -255,14 +282,16 @@ clear_screen:
 
 render_screen:
 	call clear_screen
-	mov rsi, file_buffer_addr
-	mov rdx,file_buffer_used_bytes
+	mov rsi, [file_buffer_addr]
+	mov rdx,[file_buffer_used_bytes]
 	call write_to_stdout
+	call move_terminal_cursor_to_position
 	ret
 	
 open_file_in_editor: ; file name on rdi
 	call open_file_syscall
 	mov [fd], rax
+	mov rdi, rax
 	call get_file_size	
 	mov [file_size], rax
 	call allocate_file_size_times_two
@@ -273,15 +302,31 @@ open_file_in_editor: ; file name on rdi
 
 insert_file_content_on_buffer: 
 	mov rdi, [fd]
+	call reset_file_pointer_to_start
 	mov rsi, [file_buffer_addr]
 	mov rdx, [file_size]
 	call read_syscall
+	mov [file_buffer_used_bytes], rax
+	ret
 
 
 allocate_file_size_times_two: ; file_size should be on file_size data var
-	mov rdi, [file_size]
-	add rdi, rdi;x2
+	call find_first_time_allocation_size
 	call alloc_heap_block
+	mov rax, [heap_buffer_start_addr]
 	mov [file_buffer_addr], rax
 	ret
 
+
+find_first_time_allocation_size: ; file_size on file_size var, returns on rdi
+	mov rdi, [file_size]
+	mov r12, [min_initial_allocation]
+	cmp r12, rdi
+	jge .return_min_allocation
+	add rdi, rdi
+	ret
+	.return_min_allocation:
+	mov rdi, r12
+	ret
+	
+	

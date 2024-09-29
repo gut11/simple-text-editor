@@ -49,6 +49,7 @@ section .text
 	global convert_num_to_ascii
 	global write_to_stdout
 	global expand_heap_block
+	global reset_file_pointer_to_start
 
 
 exit_program:
@@ -86,25 +87,25 @@ break_line:
 	ret
 
 convert_num_to_ascii: ; receive num on rdi
-	cmp rdi, 48
+	cmp rdi, 0
 	je .0
-	cmp rdi, 49
+	cmp rdi, 1
 	je .1
-	cmp rdi, 50
+	cmp rdi, 2
 	je .2
-	cmp rdi, 51
+	cmp rdi, 3
 	je .3
-	cmp rdi, 52
+	cmp rdi, 4
 	je .4
-	cmp rdi, 53
+	cmp rdi, 5
 	je .5
-	cmp rdi, 54
+	cmp rdi, 6
 	je .6
-	cmp rdi, 55
+	cmp rdi, 7
 	je .7
-	cmp rdi, 56
+	cmp rdi, 8
 	je .8
-	cmp rdi, 57
+	cmp rdi, 9
 	je .9
 
 	ret ; should never occur
@@ -182,7 +183,7 @@ get_file_size: ; receive file descriptor on rdi, returns file_size
 
 open_file_syscall: ; receives file name on rdi and return fd
 	mov     rax, 2; syscall number for open (2)
-	mov     rsi, 2; flags: O_RDWR (0)
+	mov     rsi, 2; flags: O_RDWR (2)
 	mov rdx, [O_CREAT] ; check_correct_flags
 	syscall ; call kernel
 	ret
@@ -216,19 +217,27 @@ alloc_heap_block: ;  receive amount of bytes on rdi and expand program break
 	mov r12, rdi
 	call get_current_break
 	mov [heap_buffer_start_addr], rax
-	add rax, r12; current_break + amount_of_bytes = new_break_addr
+	add rax, r12; current_break + amount_of_bytes = new_desired_break_addr
 	mov rdi, rax
 	call brk_syscall
 	mov [break_addr], rax
-	sub rax, [heap_buffer_start_addr] ;buffer_start - new_break = size
-	add rax, 1
+	sub rax, [heap_buffer_start_addr] ; new_break - buffer_start = buffer_size - 1
+	add rax, 1 ; (buffer_size - 1) + 1 = actual_buffer_size
 	mov [heap_buffer_size], rax
 	mov rax, [break_addr]
+	ret
+
+reset_file_pointer_to_start: ; receive file descriptor on rdi
+	mov rax, 8 ;fseek syscall
+	mov rsi, 0
+	mov rdx, 0 ; seek_set macro value
+	syscall 
 	ret
 
 read_syscall: ; fd on rdi, buf_addr on rsi and num of bytes on rdx
 	mov rax, 0
 	syscall
+	ret
 
 brk_syscall: ; receive addrss to ask on rdi
 	mov rax, 12
