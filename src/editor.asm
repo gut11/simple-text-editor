@@ -34,6 +34,7 @@ section .data
 	cursor_collum db 1 ,7 dup(0)
 	cursor_line db 1, 7 dup(0)
 	cursor_position_on_file db 8 dup(0)
+	ghost_byte db 1 dup(0) ;ghost byte is when cursor is in the front of the last byte in the buffer
 
 	timeval:
 	tv_sec  dq 1
@@ -123,6 +124,14 @@ move_chars_one_position_right: ;*buffer on rdi, buffer_content_size on rsi, star
 	.break:
 	ret
 
+on_last_char: ;set cmp register for this comparison
+	mov rax, [cursor_position_on_file]
+	cmp rax, [file_buffer_addr]
+
+; on_ghost_byte:
+; 	cmp [ghost_byte], 1
+
+
 move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
 	cmp rdx, rsi
 	jg .break
@@ -149,7 +158,6 @@ move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start
 
 	.break:
 	ret
-
 
 write_to_file:
 	mov rdi, [fd]
@@ -230,15 +238,8 @@ remove_char_from_buffer:
 	mov rdx, [cursor_position_on_file]
 	call move_chars_one_position_left
 
-	cmp qword [cursor_position_on_file], 0
-	jg .sub_position
 	sub byte [file_buffer_used_bytes], 1
 	ret
-
-	.sub_position:
-	sub qword [cursor_position_on_file], 1
-	ret
-	
 
 key_press_handler: ;receive_input on rax
 	mov rax, current_key
@@ -258,16 +259,22 @@ force_refresh:
 	ret
 	
 handle_backspace:
+	mov r9, [file_buffer_used_bytes]
 	mov r12, rdi
-	cmp qword [file_buffer_used_bytes], 1
-	jl .ret
+	cmp qword r9, 0
+	je .ret
+	cmp r9, [cursor_position_on_file]
+	je .decrement_without_remove
 	call remove_char_from_buffer
-	call decrement_cursor
+	; call decrement_cursor
 	call render_screen
 	.ret:
 	ret
-	; .sub_used_size:
-	; jmp .render
+	.decrement_without_remove:
+	; sub byte [cursor_position_on_file], 1
+	; call decrement_cursor
+	call render_screen
+	ret
 
 decrement_cursor: ;char on rax
 	cmp qword [cursor_line], 1
@@ -277,7 +284,7 @@ decrement_cursor: ;char on rax
 	cmp qword [cursor_collum], 1
 	je .collum_zero
 
-	sub qword [cursor_collum], 1
+	; sub qword [cursor_collum], 1
 
 	.ret:
 	ret
@@ -295,19 +302,62 @@ decrement_cursor: ;char on rax
 	jmp .continue
 
 
+find_previous_line_break: ;receive cursor_position_on_file on r9, return previous line_break on rax, distance from line_break in rsi
+	mov rax, r9
+	mov rdi, [file_buffer_addr]
+	add rax, rdi
+	mov rsi, 0 ;length counter \n counts
+
+	.loop:
+	cmp qword rax, rdi
+	je .ret_first_line
+	cmp byte [rax], 10
+	je .ret
+
+	sub rax, 1
+	add rsi, 1
+	jmp .loop
+
+	.ret_first_line:
+	add rsi, 1 ;fix length for first line that has one iteration less
+	ret
+
+	.ret:
+	ret
+
+find_line_length: ; receive address of first char on line on rax, return length on rcx
+	mov r15, [heap_buffer_start_addr]
+	add r15, [file_buffer_used_bytes]
+	
+	mov rcx, 1
+
+	.loop:
+	cmp rax, r15
+	je .ret
+
+	cmp byte [rax], 10
+	je .ret
+
+	add rcx, 1
+	add rax, 1
+	jmp .loop
+
+	.ret:
+	ret
+
 get_previous_line_size: ; return size on rax
 	mov rax, [cursor_position_on_file]
 	mov rdi, [file_buffer_addr]
 	mov rsi, 0 ;length counter
 
 	add rax, rdi
-	sub rax, 1 ;current \n doesnt count
+	sub rax, 2 ;current \n doesnt count
 	
 	.loop:
-	cmp byte [rax], 10
-	je .ret
 	cmp qword rax, rdi
 	je .ret_first_line
+	cmp byte [rax], 10
+	je .ret
 
 	sub rax, 1
 	add rsi, 1
@@ -356,8 +406,51 @@ handle_arrows: ;;receive arrow on open bracket byte on rdi
 
 
 handle_up:
-	mov rdi, 1
-	call move_up
+	cmp byte [cursor_line], 1
+	je .ret
+
+	mov qword r9, [cursor_position_on_file]
+	call find_previous_line_break
+	xor r10, r10
+	mov r10, rsi ;store length from current_char to first char on previous line
+	mov qword r9, [cursor_position_on_file]
+	mov r11, rax
+	sub r9, rsi
+
+	sub r9, 1 ;move to before previous linebreak
+	call find_previous_line_break ;returns on rsi with length from previous line
+
+	add r11, 1
+	mov rax, r11
+	call find_line_length
+
+	cmp rcx,rsi
+	je .move_to_line_with_same_length
+	jg .bigger_length
+
+	.move_to_line_with_less_length:
+	sub [cursor_position_on_file], r10
+	mov [cursor_collum], rsi
+	sub byte [cursor_line], 1
+	ret
+
+	.bigger_length:
+	sub [cursor_position_on_file], r10
+	; add byte [cursor_position_on_file], 1
+	add rsi, 1
+	mov [cursor_collum], rsi
+	sub byte [cursor_line], 1
+	ret
+	
+	.move_to_line_with_same_length:
+	sub [cursor_position_on_file], r10
+	sub rsi, [cursor_collum]
+	add rsi, 1
+	sub [cursor_position_on_file], rsi
+	sub byte [cursor_line], 1
+	ret
+
+	.ret:
 	ret
 
 handle_down:
@@ -370,9 +463,9 @@ handle_right:
 	cmp [cursor_position_on_file], r12
 	je .ret
 
-	add qword [cursor_position_on_file], 1
 
 	call get_current_file_buffer_position ;returns on rax addr on file buffer
+	add qword [cursor_position_on_file], 1
 	cmp byte [rax], 10
 	je .move_to_next_line
 
@@ -386,7 +479,8 @@ handle_right:
 	ret
 
 handle_left:
-	cmp byte [cursor_position_on_file], 0
+	mov rax, [cursor_position_on_file]
+	cmp byte al, 0
 	je .ret
 
 	; call get_current_file_buffer_position ;returns on rax addr on file buffer
@@ -418,7 +512,7 @@ handle_writable_char: ; current_key variable on memory
 	ret
 
 increment_cursor: ;char on rax
-	cmp rax, 10
+	cmp byte al, 10
 	jne .increment_collum
 	add qword [cursor_line], 1
 	mov qword [cursor_collum], 1
