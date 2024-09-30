@@ -20,6 +20,8 @@ section .data
 	esc_move_right db 0x1b, '[#C', 0
 	esc_move_left db 0x1b, '[#D', 0
 	esc_erase_line db 0x1b, '[2K', 0
+	esc_background_green db 0x1b, '[42m', 0
+	esc_reset_styles db 0x1b, '[0m', 0
 
 	fd db 8 dup(0)             ; Storage for the file descriptor
 	file_size db 8 dup(0)
@@ -29,8 +31,12 @@ section .data
 	min_initial_allocation dq 4096
 	current_key db 8 dup(0)
 	cursor_collum db 1 ,7 dup(0)
-	cursor_line db 8 dup(0)
+	cursor_line db 1, 7 dup(0)
 	cursor_position_on_file db 8 dup(0)
+
+	timeval:
+	tv_sec  dq 1
+    tv_nsec dq 200000000
 
 section .text
 	extern write_char_to_stdout
@@ -144,6 +150,49 @@ move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start
 	ret
 
 
+write_to_file:
+	mov rax, 1
+	mov rdi, [fd]
+	mov rsi, [file_buffer_addr]
+	mov rdx, [file_buffer_used_bytes]
+	mov [file_size], rdx
+	syscall
+	call blink_screen_green
+	ret
+
+paint_green:
+	mov rdi, esc_background_green
+	call print_str
+	ret
+
+reset_styles:
+	mov rdi, esc_reset_styles 
+	call print_str
+	ret
+	
+blink_screen_green:
+	call clear_screen
+	call paint_green
+	call render_without_clean
+	mov qword rax, 0
+	mov qword r12, 220000000
+	call sleep
+	call reset_styles
+	call render_screen
+	ret
+	
+
+sleep: ; seconds on rax, ns on r12
+	mov qword [tv_sec], rax
+	mov qword [tv_nsec], r12
+	mov qword rax, 35
+	mov rdi, timeval
+	xor rsi, rsi
+	syscall
+	ret
+
+
+
 insert_new_char_on_buffer: ;receive char to insert on rdi
 	push rdi
 	mov rdi, [file_buffer_addr]
@@ -172,14 +221,17 @@ remove_char_from_buffer:
 	ret
 	
 
-
 key_press_handler: ;receive_input on rax
 	mov rax, current_key
+	cmp byte [rax], 0x13 ;ctrl bytes
+	je write_to_file
 	cmp byte [rax], 0x1b ;ESC byte
 	je handle_arrows 
 	cmp byte [rax], 0x7f ;backspace that for some reason is del byte
 	je handle_backspace
 	jmp handle_writable_char
+	
+
 
 handle_backspace:
 	mov r12, rdi
@@ -369,6 +421,13 @@ clear_screen:
 
 render_screen:
 	call clear_screen
+	mov rsi, [file_buffer_addr]
+	mov rdx,[file_buffer_used_bytes]
+	call write_to_stdout
+	call move_terminal_cursor_to_position
+	ret
+
+render_without_clean:
 	mov rsi, [file_buffer_addr]
 	mov rdx,[file_buffer_used_bytes]
 	call write_to_stdout
