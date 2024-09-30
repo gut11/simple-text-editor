@@ -1,5 +1,3 @@
-extern printf
-
 section .data
 	global argv1
 	global argv1_length
@@ -75,7 +73,6 @@ print_int: ;receive int on rdi and print with printf
 	sub rsp, 8
 	mov rsi, rdi
 	mov rdi, int_specifier
-	call printf
 	ret
 
 write_to_stdout: ;length rdx, addr on rsi

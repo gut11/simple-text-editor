@@ -21,6 +21,7 @@ section .data
 	esc_move_left db 0x1b, '[1D', 0
 	esc_erase_line db 0x1b, '[2K', 0
 	esc_background_green db 0x1b, '[42m', 0
+	esc_background_red db 0x1b, '[41m', 0
 	esc_reset_styles db 0x1b, '[0m', 0
 
 	fd db 8 dup(0)             ; Storage for the file descriptor
@@ -162,6 +163,11 @@ write_to_file:
 	call blink_screen_green
 	ret
 
+paint_red:
+	mov rdi, esc_background_red
+	call print_str
+	ret
+
 paint_green:
 	mov rdi, esc_background_green
 	call print_str
@@ -170,6 +176,17 @@ paint_green:
 reset_styles:
 	mov rdi, esc_reset_styles 
 	call print_str
+	ret
+
+blink_screen_red:
+	call clear_screen
+	call paint_red
+	call render_without_clean
+	mov qword rax, 0
+	mov qword r12, 220000000
+	call sleep
+	call reset_styles
+	call render_screen
 	ret
 	
 blink_screen_green:
@@ -227,11 +244,18 @@ key_press_handler: ;receive_input on rax
 	mov rax, current_key
 	cmp byte [rax], 0x13 ;ctrl bytes
 	je write_to_file
+	cmp byte [rax], 0x10 ;force refresh bytes
+	je force_refresh
 	cmp byte [rax], 0x1b ;ESC byte
 	je handle_arrows 
 	cmp byte [rax], 0x7f ;backspace that for some reason is del byte
 	je handle_backspace
 	jmp handle_writable_char
+
+force_refresh:
+	call render_screen
+	call blink_screen_red
+	ret
 	
 handle_backspace:
 	mov r12, rdi
@@ -326,7 +350,6 @@ handle_arrows: ;;receive arrow on open bracket byte on rdi
 	jmp .ret
 	.left:
 	call handle_left
-
 	.ret:
 	call render_screen
 	ret
