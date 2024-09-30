@@ -1,4 +1,7 @@
-compile: 
+create_build:
+	mkdir -p ./build/
+
+compile: create_build
 	./assemble.sh
 
 link: 
