@@ -15,10 +15,10 @@ section .data
 	esc_move_home db 0x1b, '[H', 0
 	esc_cursor_absolute_position db 0x1b, '[', 250 dup(0)  ;'[#;#H' string format
 	esc_clear_screen db 0x1b, 'c', 0
-	esc_move_up db 0x1b, '[#A', 0 ;# is number of lines
-	esc_move_down db 0x1b, '[#B', 0
-	esc_move_right db 0x1b, '[#C', 0
-	esc_move_left db 0x1b, '[#D', 0
+	esc_move_up db 0x1b, '[1A', 0 ;# is number of lines
+	esc_move_down db 0x1b, '[1B', 0
+	esc_move_right db 0x1b, '[1C', 0
+	esc_move_left db 0x1b, '[1D', 0
 	esc_erase_line db 0x1b, '[2K', 0
 	esc_background_green db 0x1b, '[42m', 0
 	esc_reset_styles db 0x1b, '[0m', 0
@@ -151,6 +151,8 @@ move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start
 
 
 write_to_file:
+	mov rdi, [fd]
+	call reset_file_pointer_to_start
 	mov rax, 1
 	mov rdi, [fd]
 	mov rsi, [file_buffer_addr]
@@ -231,34 +233,104 @@ key_press_handler: ;receive_input on rax
 	je handle_backspace
 	jmp handle_writable_char
 	
-
-
 handle_backspace:
 	mov r12, rdi
 	cmp qword [file_buffer_used_bytes], 1
 	jl .ret
 	call remove_char_from_buffer
-	cmp qword [cursor_collum], 0
-	je .render
-	sub qword [cursor_collum], 1
-	.render:
+	call decrement_cursor
 	call render_screen
 	.ret:
 	ret
-	.sub_used_size:
-	jmp .render
+	; .sub_used_size:
+	; jmp .render
+
+decrement_cursor: ;char on rax
+	cmp qword [cursor_line], 1
+	je .line_one
+	.continue:
+
+	cmp qword [cursor_collum], 1
+	je .collum_zero
+
+	sub qword [cursor_collum], 1
+
+	.ret:
+	ret
+
+	.collum_zero:
+	call get_previous_line_size
+	add rax, 1 ;\n removed but cannot be rendered
+	sub qword [cursor_line], 1
+	mov qword [cursor_collum], rax
+	ret
+
+	.line_one:
+	cmp qword [cursor_collum], 1
+	je .ret
+	jmp .continue
+
+
+get_previous_line_size: ; return size on rax
+	mov rax, [cursor_position_on_file]
+	mov rdi, [file_buffer_addr]
+	mov rsi, 0 ;length counter
+
+	add rax, rdi
+	sub rax, 1 ;current \n doesnt count
+	
+	.loop:
+	cmp byte [rax], 10
+	je .ret
+	cmp qword rax, rdi
+	je .ret_first_line
+
+	sub rax, 1
+	add rsi, 1
+
+	jmp .loop
+
+	.ret_first_line:
+	mov rax, rsi
+	add rax, 1 ;for the \n from previous line that is missing in the first line
+	ret
+
+	.ret:
+	mov rax, rsi
+	ret
+
+get_current_file_buffer_position:
+	mov rax, [cursor_position_on_file]
+	mov rdi, [file_buffer_addr]
+	add rax, rdi
+	ret
 
 handle_arrows: ;;receive arrow on open bracket byte on rdi
-	add rdi, 2 ; move to letter
-	cmp rdi, 'A'
+	add rax, 2 ; move to letter
+	cmp byte [rax], 'A'
+	je .up
+	cmp byte [rax], 'B'
+	je .down
+	cmp byte [rax], 'C'
+	je .right
+	cmp byte [rax], 'D'
+	je .left
+	.up:
 	call handle_up
-	cmp rdi, 'B'
+	jmp .ret
+	.down:
 	call handle_down
-	cmp rdi, 'C'
+	jmp .ret
+	.right:
 	call handle_right
-	cmp rdi, 'D'
+	jmp .ret
+	.left:
 	call handle_left
+
+	.ret:
+	call render_screen
 	ret
+
 
 handle_up:
 	mov rdi, 1
@@ -271,13 +343,43 @@ handle_down:
 	ret
 
 handle_right:
-	mov rdi, 1
-	call move_right
+	mov r12, [file_buffer_used_bytes]
+	cmp [cursor_position_on_file], r12
+	je .ret
+
+	add qword [cursor_position_on_file], 1
+
+	call get_current_file_buffer_position ;returns on rax addr on file buffer
+	cmp byte [rax], 10
+	je .move_to_next_line
+
+	add qword [cursor_collum], 1
+	jmp .ret
+
+	.move_to_next_line:
+	mov qword [cursor_collum], 1
+	add qword [cursor_line], 1
+	.ret:
 	ret
 
 handle_left:
-	mov rdi, 1
-	call move_left
+	mov r12, [file_buffer_used_bytes]
+	cmp [cursor_position_on_file], r12
+	je .ret
+
+	add qword [cursor_position_on_file], 1
+
+	call get_current_file_buffer_position ;returns on rax addr on file buffer
+	cmp byte [rax], 10
+	je .move_to_next_line
+
+	add qword [cursor_collum], 1
+	jmp .ret
+
+	.move_to_next_line:
+	mov qword [cursor_collum], 1
+	add qword [cursor_line], 1
+	.ret:
 	ret
 
 handle_writable_char: ; current_key variable on memory
@@ -285,10 +387,23 @@ handle_writable_char: ; current_key variable on memory
 	call resize_buffer_if_necessary
 	mov rdi, [current_key]
 	call insert_new_char_on_buffer
-	add qword [cursor_collum], 1
+	mov rax, [current_key]
+	call increment_cursor
 	add qword [cursor_position_on_file], 1
 	call render_screen
 	ret
+
+increment_cursor: ;char on rax
+	cmp rax, 10
+	jne .increment_collum
+	add qword [cursor_line], 1
+	mov qword [cursor_collum], 1
+	jmp .ret
+	.increment_collum:
+	add qword [cursor_collum], 1
+	.ret:
+	ret
+
 
 move_terminal_cursor_to_position:
 	call insert_numbers_on_esc_string

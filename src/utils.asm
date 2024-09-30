@@ -260,7 +260,9 @@ get_file_size: ; receive file descriptor on rdi, returns file_size
 open_file_syscall: ; receives file name on rdi and return fd
 	mov     rax, 2; syscall number for open (2)
 	mov     rsi, 2; flags: O_RDWR (2)
+	xor rdx, rdx
 	mov rdx, [O_CREAT] ; check_correct_flags
+	or rdx, [O_TRUNC]
 	syscall ; call kernel
 	ret
 
