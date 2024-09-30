@@ -363,22 +363,23 @@ handle_right:
 	ret
 
 handle_left:
-	mov r12, [file_buffer_used_bytes]
-	cmp [cursor_position_on_file], r12
+	cmp byte [cursor_position_on_file], 0
 	je .ret
 
-	add qword [cursor_position_on_file], 1
+	; call get_current_file_buffer_position ;returns on rax addr on file buffer
+	cmp byte [cursor_collum], 1
+	je .move_to_previous_line
 
-	call get_current_file_buffer_position ;returns on rax addr on file buffer
-	cmp byte [rax], 10
-	je .move_to_next_line
+	sub qword [cursor_collum], 1
+	jmp .ret_subtract
 
-	add qword [cursor_collum], 1
-	jmp .ret
-
-	.move_to_next_line:
-	mov qword [cursor_collum], 1
-	add qword [cursor_line], 1
+	.move_to_previous_line:
+	call get_previous_line_size
+	add rax, 1 ;move to \n not last char
+	mov qword [cursor_collum], rax
+	sub qword [cursor_line], 1
+	.ret_subtract:
+	sub qword [cursor_position_on_file], 1
 	.ret:
 	ret
 
