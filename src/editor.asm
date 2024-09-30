@@ -28,7 +28,7 @@ section .data
 	buffer_resize_threshold db 8 dup(0)
 	min_initial_allocation dq 4096
 	current_key db 8 dup(0)
-	cursor_collum db 8 dup(0)
+	cursor_collum db 1 ,7 dup(0)
 	cursor_line db 8 dup(0)
 	cursor_position_on_file db 8 dup(0)
 
@@ -116,6 +116,34 @@ move_chars_one_position_right: ;*buffer on rdi, buffer_content_size on rsi, star
 	.break:
 	ret
 
+move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
+	cmp rdx, rsi
+	jg .break
+
+	mov r15, 0 ; previous_char, starts null
+	mov r14, 0 ;loop_counter
+	mov r12, rsi
+
+	sub r12, rdx ; buffer_content_size - start_index = remaining_index
+
+	mov r13, rdx
+	add r13, rdi ;r13 = *current_char
+
+	.loop:
+	cmp r14, r12
+	jg .break
+
+	mov byte r15b, [r13 + 1]; next_char
+	mov byte [r13], r15b ; substitute_current_char by next
+
+	add r13, 1
+	add r14, 1
+	jmp .loop
+
+	.break:
+	ret
+
+
 insert_new_char_on_buffer: ;receive char to insert on rdi
 	push rdi
 	mov rdi, [file_buffer_addr]
@@ -128,6 +156,23 @@ insert_new_char_on_buffer: ;receive char to insert on rdi
 	mov byte [r12], r13b ;insert char on buffer
 	ret
 
+remove_char_from_buffer:
+	mov rdi, [file_buffer_addr]
+	mov rsi, [file_buffer_used_bytes]
+	mov rdx, [cursor_position_on_file]
+	call move_chars_one_position_left
+
+	cmp qword [cursor_position_on_file], 0
+	jg .sub_position
+	sub byte [file_buffer_used_bytes], 1
+	ret
+
+	.sub_position:
+	sub qword [cursor_position_on_file], 1
+	ret
+	
+
+
 key_press_handler: ;receive_input on rax
 	mov rax, current_key
 	cmp byte [rax], 0x1b ;ESC byte
@@ -138,9 +183,18 @@ key_press_handler: ;receive_input on rax
 
 handle_backspace:
 	mov r12, rdi
-	sub byte [file_buffer_used_bytes], 1
+	cmp qword [file_buffer_used_bytes], 1
+	jl .ret
+	call remove_char_from_buffer
+	cmp qword [cursor_collum], 0
+	je .render
+	sub qword [cursor_collum], 1
+	.render:
 	call render_screen
+	.ret:
 	ret
+	.sub_used_size:
+	jmp .render
 
 handle_arrows: ;;receive arrow on open bracket byte on rdi
 	add rdi, 2 ; move to letter
