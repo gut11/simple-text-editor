@@ -4,12 +4,16 @@ section .data
 	extern argv1_length
 	extern argv0_length
 	extern argv0
+	extern line_str_num
+	extern collum_str_num
 
 	backspace db 8,0
 	open_bracket db 0x5b, 0
 
+	test_str db 500 dup(0), 10, 0
+
 	esc_move_home db 0x1b, '[H', 0
-	esc_cursor_absolute_position db 0x1b, '[#;#H', 0
+	esc_cursor_absolute_position db 0x1b, '[', 250 dup(0)  ;'[#;#H' string format
 	esc_clear_screen db 0x1b, 'c', 0
 	esc_move_up db 0x1b, '[#A', 0 ;# is number of lines
 	esc_move_down db 0x1b, '[#B', 0
@@ -66,6 +70,13 @@ _start:
 	; mov rdi, 1
 	; mov rsi, 0
 	; call write_to_stdout
+		; mov rdi, 77652
+		; mov rsi, test_str
+		; call convert_num_to_ascii test
+		; mov rdi, rax
+		; call print_str
+		; jmp exit_program
+
 	call canonical_off
 	call echo_off
 	call clear_screen
@@ -73,7 +84,7 @@ _start:
 	mov rdi, [argv1]
 	call open_file_in_editor
 	call render_screen
-	call move_home
+	; call move_home
 	.loop:
 	call wait_for_input
 	call key_press_handler
@@ -118,15 +129,12 @@ insert_new_char_on_buffer: ;receive char to insert on rdi
 	ret
 
 key_press_handler: ;receive_input on rax
-	mov rax, [current_key]
-	cmp byte al, 8 ;backspace byte
-	jne handle_writable_char
-	add al, 1
-	cmp byte al, [open_bracket]
-	mov byte dil, al
-	jne handle_backspace;
+	mov rax, current_key
+	cmp byte [rax], 0x1b ;ESC byte
 	je handle_arrows 
-	ret
+	cmp byte [rax], 0x7f ;backspace that for some reason is del byte
+	je handle_backspace
+	jmp handle_writable_char
 
 handle_backspace:
 	mov r12, rdi
@@ -167,10 +175,12 @@ handle_left:
 	ret
 
 handle_writable_char: ; current_key variable on memory
-	add byte [file_buffer_used_bytes], 1
+	add qword [file_buffer_used_bytes], 1
 	call resize_buffer_if_necessary
 	mov rdi, [current_key]
 	call insert_new_char_on_buffer
+	add qword [cursor_collum], 1
+	add qword [cursor_position_on_file], 1
 	call render_screen
 	ret
 
@@ -181,15 +191,38 @@ move_terminal_cursor_to_position:
 	ret
 
 insert_numbers_on_esc_string:
+	mov rdi, [cursor_line]
+	mov rsi, line_str_num
+	call convert_num_to_ascii
 	mov r12, esc_cursor_absolute_position
 	add r12, 2 ; move to first num place
-	mov rdi, [cursor_line]
-	call convert_num_to_ascii
-	mov byte [r12], al
-	add r12, 2 ;next num
+	call insert_nums_on_esc_string
+	mov byte [r12], 0x3b ;insert ';' on esc_string
+	add r12, 1
 	mov rdi, [cursor_collum]
+	mov rsi, collum_str_num
+	push r12 ;save r12
 	call convert_num_to_ascii
-	mov byte [r12], al
+	pop r12
+	call insert_nums_on_esc_string
+	mov byte [r12], 0x48 ; insert H on esc_str
+	add r12, 1
+	mov byte [r12], 0 ;null terminate
+	ret
+
+insert_nums_on_esc_string: ;esc_str on r12 and number_str on rax
+	.loop:
+	cmp byte [rax], 0
+	je .ret
+
+	mov byte r11b, [rax]
+	mov byte [r12], r11b
+
+	add rax, 1
+	add r12, 1
+
+	jmp .loop
+	.ret:
 	ret
 
 
@@ -223,7 +256,7 @@ wait_for_input: ;fill current_key buffer
 	ret
 
 insert_number_of_moves_on_esc: ; receive str_addr on rdi, number on rsi
-	mov r12, rdi
+	mov rsi, rdi
 	mov rdi, rsi
 	call convert_num_to_ascii
 	add r12, 2 ; walk until # index

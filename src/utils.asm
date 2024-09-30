@@ -5,6 +5,9 @@ section .data
 	global argv1_length
 	global argv0_length
 	global argv0
+	global line_str_num
+	global collum_str_num
+
 	;       modes
 	O_RDONLY db 0           ; read-only
 	O_WRONLY db 1           ; write-only
@@ -28,6 +31,9 @@ section .data
 	break_addr db 8 dup(0)
 	heap_buffer_size db 8 dup(0)
 	line_break db 10, 0
+	collum_str_num db 100 dup(0)
+	line_str_num db 100 dup(0)
+	temp_str_num_store db 100 dup(0)
 
 
 section .text
@@ -86,7 +92,78 @@ break_line:
 	syscall ; result at rax
 	ret
 
-convert_num_to_ascii: ; receive num on rdi
+convert_num_to_ascii: ; receive num on rdi, num_str_addr on rsi returns num_str addr on rax
+	xor rax, rax
+	xor rdx, rdx ; clean registers
+
+	mov r12d, edi
+	mov byte al, 1 ;only for eax not be zero
+	mov r14, 0 ;digit count
+	mov r8, temp_str_num_store ;temp array for storing the digits
+
+	mov eax, edi ;32 bit integer
+	.loop:
+	xor edx, edx ;zero on top of compound register
+	mov ecx, 10
+	div ecx ;result: eax, remainder: edx
+
+	push rax ;store only because convert uses rax
+	push rdx
+	call convert_digit_to_ascii
+
+	add r8, r14
+	mov [r8], eax
+
+	pop rax ; restore eax value
+	cmp eax, 0
+	mov r8, temp_str_num_store
+	je move_from_temp_array_in_reverse_order
+	add r14, 1 ;increment digit count
+	jmp .loop
+
+
+move_from_temp_array_in_reverse_order: ;receiving_array on rsi, temp_array on r8, higher index on r14
+	mov rax, 0 ;counter
+	mov rdi, 0 ;break_loop condition
+	mov r9, rsi ;original_addr from receiving
+	mov r10, r8 ;original_addr from temp
+
+	.loop:
+	cmp r14, 0
+	je .set_break_condition
+
+	.loop_body:
+	mov rsi, r9 ;restore addresses that were added on previous iteration
+	mov r8, r10
+
+	add rsi, rax
+	add r8, r14
+
+	mov byte r11b, [r8] ;store r8 byte on r11
+	mov byte [rsi], r11b
+	
+	add rax, 1 ;increse receiving array addr
+	sub r14, 1 ;decrese higher address
+	
+	cmp rdi, 1
+	je .ret
+	jmp .loop
+
+	.set_break_condition:
+	mov rdi, 1
+	jmp .loop_body
+
+	.ret:
+	mov rsi, r9
+	add rsi, rax
+	mov byte [rsi], 0 ;add null char
+	mov rax, r9 ;put string addr on rax for return
+	ret
+	
+convert_digit_to_ascii: ; receive num on stack
+	pop r12 ;save_address on r12
+	pop rdi
+	push r12 ;push it back to the stack for the ret
 	cmp rdi, 0
 	je .0
 	cmp rdi, 1
@@ -138,7 +215,6 @@ convert_num_to_ascii: ; receive num on rdi
 	jmp .ret
 	.9:
 	mov rax, 57
-	jmp .ret
 	.ret:
 	ret
 
