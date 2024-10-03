@@ -12,11 +12,11 @@ section .data
 	O_RDWR   db 2           ; read and write
 
 	; flags
-	O_CREAT  dw 100         ; create file if it doesn't exist
-	O_TRUNC  dw 1000        ; truncate file
-	O_APPEND dw 2000        ; append to file
+	O_CREAT  db 64,0,0,0         ; create file if it doesn't exist
+	O_TRUNC  db 0,0x02,0,0; truncate file
+	AT_FDCWD dd -100          ; read and write
 
-	SEEK_END db 2
+	SEEK_END db 2,0,0,0
 
 	input_char db 100 dup(0)
 	int_specifier db 'int: %i', 10, 0
@@ -252,30 +252,28 @@ get_file_size: ; receive file descriptor on rdi, returns file_size
 	mov rsi, 0
 	mov rdx, 2 ; seek_end macro value
 	syscall 
+	cmp dword rax, 0xfffffffffffffff7
+	je .return_zero_if_file_doesnt_exist
+	ret
+	.return_zero_if_file_doesnt_exist:
+	mov rax, 0
 	ret
 
 open_file_syscall: ; receives file name on rdi and return fd
-	mov     rax, 2; syscall number for open (2)
-	mov     rsi, 2; flags: O_RDWR (2)
+	mov rax, 257; syscall number for open (2)
+	mov rsi, rdi
+	mov dword rdi, [AT_FDCWD]
+	; mov r10, 2; flags: O_RDWR (2)
 	xor rdx, rdx
-	mov rdx, [O_CREAT] ; check_correct_flags
-	or rdx, [O_TRUNC]
+	mov dword edx, [O_CREAT] ; check_correct_flags
+	or dword edx, [O_TRUNC]
+	or dword edx, 2
 	syscall ; call kernel
 	ret
 
 lseek_syscall: ;look at the linux ABI
 	mov rax, 8
 	syscall
-
-reset_file_ptr: ;fd on rdi
-	mov rsi, 0
-	mov rdx, [SEEK_END]
-	call lseek_syscall
-	ret
-	
-; insert_char_on_position: ;fd on rdi, receives position on rsi,  
-; 	mov r12, rsi
-; 	call reset_file_ptr
 
 expand_heap_block: ; receive amount of bytes on rdi
 	mov r12, rdi

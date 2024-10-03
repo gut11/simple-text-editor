@@ -10,7 +10,7 @@ section .data
 	backspace db 8,0
 	open_bracket db 0x5b, 0
 
-	test_str db 500 dup(0), 10, 0
+	err_open_file db 'Error trying to open the file', 10, 0
 
 	esc_move_home db 0x1b, '[H', 0
 	esc_cursor_absolute_position db 0x1b, '[', 250 dup(0)  ;'[#;#H' string format
@@ -132,6 +132,11 @@ on_last_char: ;set cmp register for this comparison
 ; 	cmp [ghost_byte], 1
 
 
+fatal_error: ;receive msg on r8
+	mov rdi, r8
+	call print_str
+	jmp exit_program
+
 move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start_index on rdx
 	cmp rdx, rsi
 	jg .break
@@ -166,6 +171,7 @@ write_to_file:
 	mov rdi, [fd]
 	mov rsi, [file_buffer_addr]
 	mov rdx, [file_buffer_used_bytes]
+	add rdx, 10
 	mov [file_size], rdx
 	syscall
 	call blink_screen_green
@@ -669,6 +675,8 @@ render_without_clean:
 	
 open_file_in_editor: ; file name on rdi
 	call open_file_syscall
+	cmp rax, 0
+	jl .error_openning_file
 	mov [fd], rax
 	mov rdi, rax
 	call get_file_size	
@@ -678,6 +686,9 @@ open_file_in_editor: ; file name on rdi
 	call set_buffer_threshold
 	call insert_file_content_on_buffer
 	ret
+	.error_openning_file:
+	mov r8, err_open_file
+	call fatal_error
 
 insert_file_content_on_buffer: 
 	mov rdi, [fd]
