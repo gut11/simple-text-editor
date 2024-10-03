@@ -304,6 +304,42 @@ decrement_cursor: ;char on rax
 	jmp .continue
 
 
+find_next_line_break: ;receive cursor_position_on_file on r9, return next line break addr on rax, distance from line_break in rsi,
+	mov rax, r9
+
+	mov rdi, [file_buffer_addr]
+	add rax, rdi
+
+	mov rsi, 0 ;length counter \n counts
+	add rdi, [file_buffer_used_bytes] 
+	sub rdi, 1 ;set rdi to last byte addr
+
+	cmp byte [rax], 10
+	je .treat_case_if_current_char_is_line_break
+	
+	.loop:
+	cmp qword rax, rdi
+	je .ret_last_line
+	cmp byte [rax], 10
+	je .ret
+
+	add rax, 1
+	add rsi, 1
+	jmp .loop
+
+	.ret_last_line:
+	add rsi, 1 ;fix length for last line that has one iteration less
+	ret
+
+	.ret:
+	ret
+
+	.treat_case_if_current_char_is_line_break:
+	add rax, 1
+	add rsi, 1
+	jmp .loop
+
+
 find_previous_line_break: ;receive cursor_position_on_file on r9, return previous line_break addr on rax, distance from line_break in rsi,
 	mov rax, r9
 	mov rdi, [file_buffer_addr]
@@ -450,9 +486,53 @@ handle_up:
 	ret
 
 handle_down:
-	mov rdi, 1
-	call move_down
+	mov qword r9, [cursor_position_on_file]
+	cmp byte r9, [file_buffer_used_bytes]
+	je .ret
+
+	call find_next_line_break
+	mov r10, rsi ;store length from current_char to line break
+
+	mov rax, [file_buffer_addr]
+	add rax, r9
+
+	cmp byte [rax], 10
+	je .handle_case_where_current_char_is_line_break ;if current char is linebreak, next line break already is from the other line
+
+	add r9, rsi ;add from cursor position the length to next line break
+	call find_next_line_break ;returns on rsi with length from next line
+
+	mov rcx, [cursor_collum]
+
+	.cmp:
+	cmp rsi, rcx ;rsi=next_line_length and rcx=cursor_position
+	jge .move_to_line_same_or_bigger_length
+
+	.move_to_line_less_length:
+	add [cursor_position_on_file], r10
+	add [cursor_position_on_file], rsi
+	mov [cursor_collum], rsi
+	add byte [cursor_line], 1
 	ret
+	
+	.move_to_line_same_or_bigger_length:
+	add [cursor_position_on_file], r10
+	mov rsi, [cursor_collum]
+	add [cursor_position_on_file], rsi
+	add byte [cursor_line], 1
+	ret 
+
+	.ret:
+	ret
+
+	.handle_case_where_current_char_is_line_break:
+	mov r10, 0 ;because we are in the line break for the next line
+	mov rcx, [cursor_collum]
+	; call find_previous_line_break
+	; sub rsi, 1 ; -1 in the length because should not be length to last line break but to first char after line break
+	; sub r9, rsi
+	; mov rcx, r9 ; insert on rcx the length from current_line
+	jmp .cmp
 
 handle_right:
 	mov r12, [file_buffer_used_bytes]
