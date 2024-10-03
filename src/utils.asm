@@ -14,7 +14,7 @@ section .data
 	; flags
 	O_CREAT  db 64,0,0,0         ; create file if it doesn't exist
 	O_TRUNC  db 0,0x02,0,0; truncate file
-	AT_FDCWD dd -100          ; read and write
+	AT_FDCWD dq -100          ; read and write
 
 	SEEK_END db 2,0,0,0
 
@@ -42,7 +42,6 @@ section .text
 	global print_str
 	global print_int
 	global exit_program
-	global open_file_syscall
 	global get_file_size
 	global heap_buffer_start_addr
 	global break_addr
@@ -54,6 +53,9 @@ section .text
 	global write_to_stdout
 	global expand_heap_block
 	global reset_file_pointer_to_start
+	global open_file_for_read
+	global open_file_for_write
+	extern _start
 
 
 exit_program:
@@ -252,21 +254,33 @@ get_file_size: ; receive file descriptor on rdi, returns file_size
 	mov rsi, 0
 	mov rdx, 2 ; seek_end macro value
 	syscall 
-	cmp dword rax, 0xfffffffffffffff7
+	cmp rax, 0xfffffffffffffff7
 	je .return_zero_if_file_doesnt_exist
 	ret
 	.return_zero_if_file_doesnt_exist:
 	mov rax, 0
 	ret
 
-open_file_syscall: ; receives file name on rdi and return fd
+open_file_for_read:; receives file name on rdi and return fd
 	mov rax, 257; syscall number for open (2)
 	mov rsi, rdi
-	mov dword rdi, [AT_FDCWD]
-	; mov r10, 2; flags: O_RDWR (2)
+	xor rdi, rdi
+	mov dword edi, [AT_FDCWD]
+	mov r10, 0o644; file perms bits
+	xor rdx, rdx
+	or dword edx, 2 ; RDWR flag
+	syscall ; call kernel
+	ret
+
+open_file_for_write: ; receives file name on rdi and return fd on rax
+	mov rax, 257; syscall number for open (2)
+	mov rsi, rdi
+	xor rdi, rdi
+	mov dword edi, [AT_FDCWD]
+	mov r10, 0o644; file perms bits
 	xor rdx, rdx
 	mov dword edx, [O_CREAT] ; check_correct_flags
-	or dword edx, [O_TRUNC]
+	or dword edx, [O_TRUNC] ; check_correct_flags
 	or dword edx, 2
 	syscall ; call kernel
 	ret

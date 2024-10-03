@@ -11,6 +11,7 @@ section .data
 	open_bracket db 0x5b, 0
 
 	err_open_file db 'Error trying to open the file', 10, 0
+	err_writing_to_file db 'Error writing to file', 10, 0
 
 	esc_move_home db 0x1b, '[H', 0
 	esc_cursor_absolute_position db 0x1b, '[', 250 dup(0)  ;'[#;#H' string format
@@ -34,7 +35,7 @@ section .data
 	cursor_collum db 1 ,7 dup(0)
 	cursor_line db 1, 7 dup(0)
 	cursor_position_on_file db 8 dup(0)
-	ghost_byte db 1 dup(0) ;ghost byte is when cursor is in the front of the last byte in the buffer
+	first_write db 0 ;boolean for first write
 
 	timeval:
 	tv_sec  dq 1
@@ -47,7 +48,6 @@ section .text
 	extern print_str
 	extern print_int
 	extern exit_program
-	extern open_file_syscall
 	extern get_file_size ; receive file descriptor on rdi, returns file_size
 	extern read_syscall
 	extern alloc_heap_block
@@ -60,31 +60,12 @@ section .text
 	extern echo_off
 	extern heap_buffer_start_addr
 	extern reset_file_pointer_to_start
+	extern open_file_for_read
+	extern open_file_for_write
 
 	global  _start
 
 _start:
-	; call clear_screen
-	; call read_args
-	; call get_file_path_size
-	; mov rdi, [argv1]
-	; call print_str
-	; call break_line
-	; AND  rsp, 0xFFFFFFFFFFFFFFF0
-	; mov edi, [argv1_length]
-	; call print_int
-	; mov rdi, backspace
-	; call print_str
-	; mov rdi, 1
-	; mov rsi, 0
-	; call write_to_stdout
-		; mov rdi, 77652
-		; mov rsi, test_str
-		; call convert_num_to_ascii test
-		; mov rdi, rax
-		; call print_str
-		; jmp exit_program
-
 	call canonical_off
 	call echo_off
 	call clear_screen
@@ -92,7 +73,6 @@ _start:
 	mov rdi, [argv1]
 	call open_file_in_editor
 	call render_screen
-	; call move_home
 	.loop:
 	call wait_for_input
 	call key_press_handler
@@ -165,6 +145,9 @@ move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start
 	ret
 
 write_to_file:
+	cmp byte [first_write], 0
+	je .first_write
+	.not_first_write:
 	mov rdi, [fd]
 	call reset_file_pointer_to_start
 	mov rax, 1
@@ -176,6 +159,12 @@ write_to_file:
 	syscall
 	call blink_screen_green
 	ret
+	.first_write:
+	mov rdi, [argv1]
+	call open_file_for_write
+	mov [fd], rax
+	mov byte [first_write], 1
+	jmp .not_first_write
 
 paint_red:
 	mov rdi, esc_background_red
@@ -570,7 +559,6 @@ insert_nums_on_esc_string: ;esc_str on r12 and number_str on rax
 	.ret:
 	ret
 
-
 resize_buffer_if_necessary: 
 	mov rdi, [buffer_resize_threshold]
 	cmp [file_buffer_used_bytes], rdi
@@ -672,31 +660,40 @@ render_without_clean:
 	call write_to_stdout
 	call move_terminal_cursor_to_position
 	ret
-	
+
+render_error: ;receives msg on rdi
+	call clear_screen
+	push rdi
+	call print_str
+	pop rsi
+	mov rdi, 1
+	mov rdx, 2
+	call read_syscall
+	call render_screen
+	ret
+
 open_file_in_editor: ; file name on rdi
-	call open_file_syscall
-	cmp rax, 0
-	jl .error_openning_file
+	call open_file_for_read
 	mov [fd], rax
 	mov rdi, rax
-	call get_file_size	
+	call get_file_size
 	mov [file_size], rax
 	call allocate_file_size_times_two
 	mov rdi, [heap_buffer_size]
 	call set_buffer_threshold
 	call insert_file_content_on_buffer
 	ret
-	.error_openning_file:
-	mov r8, err_open_file
-	call fatal_error
 
 insert_file_content_on_buffer: 
+	cmp byte [file_size], 0
+	je .ret
 	mov rdi, [fd]
 	call reset_file_pointer_to_start
 	mov rsi, [file_buffer_addr]
 	mov rdx, [file_size]
 	call read_syscall
 	mov [file_buffer_used_bytes], rax
+	.ret
 	ret
 
 
