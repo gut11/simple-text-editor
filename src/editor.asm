@@ -148,8 +148,8 @@ move_chars_one_position_left: ;*buffer on rdi, buffer_content_size on rsi, start
 
 write_to_file:
 	cmp byte [first_write], 0
-	je .first_write
-	.not_first_write:
+	je .open_in_truncate_mode
+	.write:
 	mov rdi, [fd]
 	call reset_file_pointer_to_start
 	cmp rax, 0
@@ -158,19 +158,18 @@ write_to_file:
 	mov rdi, [fd]
 	mov rsi, [file_buffer_addr]
 	mov rdx, [file_buffer_used_bytes]
-	add rdx, 10
 	mov [file_size], rdx
 	syscall
 	call blink_screen_green
 	ret
-	.first_write:
+	.open_in_truncate_mode:
 	mov rdi, [argv1]
 	call open_file_for_write
 	cmp rax, 0
 	jl .write_error
 	mov [fd], rax
 	mov byte [first_write], 1
-	jmp .not_first_write
+	jmp .write
 	.write_error:
 	mov rdi, err_writing_to_file
 	call render_error
@@ -305,12 +304,15 @@ decrement_cursor: ;char on rax
 	jmp .continue
 
 
-find_previous_line_break: ;receive cursor_position_on_file on r9, return previous line_break on rax, distance from line_break in rsi
+find_previous_line_break: ;receive cursor_position_on_file on r9, return previous line_break addr on rax, distance from line_break in rsi,
 	mov rax, r9
 	mov rdi, [file_buffer_addr]
 	add rax, rdi
 	mov rsi, 0 ;length counter \n counts
 
+	cmp byte [rax], 10
+	je .treat_case_if_current_char_is_line_break
+	
 	.loop:
 	cmp qword rax, rdi
 	je .ret_first_line
@@ -327,6 +329,12 @@ find_previous_line_break: ;receive cursor_position_on_file on r9, return previou
 
 	.ret:
 	ret
+
+	.treat_case_if_current_char_is_line_break:
+	sub rax, 1
+	add rsi, 1
+	jmp .loop
+
 
 find_line_length: ; receive address of first char on line on rax, return length on rcx
 	mov r15, [heap_buffer_start_addr]
@@ -414,41 +422,26 @@ handle_up:
 
 	mov qword r9, [cursor_position_on_file]
 	call find_previous_line_break
-	xor r10, r10
-	mov r10, rsi ;store length from current_char to first char on previous line
-	mov qword r9, [cursor_position_on_file]
-	mov r11, rax
-	sub r9, rsi
+	mov r10, rsi ;store length from current_char to line break on previous line
 
-	sub r9, 1 ;move to before previous linebreak
+	sub r9, rsi ;subtract from cursor position the length to previous line break
 	call find_previous_line_break ;returns on rsi with length from previous line
 
-	add r11, 1
-	mov rax, r11
-	call find_line_length
+	mov rcx, [cursor_collum]
 
-	cmp rcx,rsi
-	je .move_to_line_with_same_length
-	jg .bigger_length
+	.cmp:
+	cmp rsi, rcx ;rsi=previous_line_length and rcx=cursor_position
+	jge .move_to_line_same_or_bigger_length
 
-	.move_to_line_with_less_length:
+	.move_to_line_less_length:
 	sub [cursor_position_on_file], r10
-	mov [cursor_collum], rsi
-	sub byte [cursor_line], 1
-	ret
-
-	.bigger_length:
-	sub [cursor_position_on_file], r10
-	; add byte [cursor_position_on_file], 1
-	add rsi, 1
 	mov [cursor_collum], rsi
 	sub byte [cursor_line], 1
 	ret
 	
-	.move_to_line_with_same_length:
+	.move_to_line_same_or_bigger_length:
 	sub [cursor_position_on_file], r10
 	sub rsi, [cursor_collum]
-	add rsi, 1
 	sub [cursor_position_on_file], rsi
 	sub byte [cursor_line], 1
 	ret
@@ -465,7 +458,6 @@ handle_right:
 	mov r12, [file_buffer_used_bytes]
 	cmp [cursor_position_on_file], r12
 	je .ret
-
 
 	call get_current_file_buffer_position ;returns on rax addr on file buffer
 	add qword [cursor_position_on_file], 1
