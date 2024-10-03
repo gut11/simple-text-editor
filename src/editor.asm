@@ -12,6 +12,7 @@ section .data
 
 	err_open_file db 'Error trying to open the file', 10, 0
 	err_writing_to_file db 'Error writing to file', 10, 0
+	err_press_any_key db 10, 10, 'Press enter to go back to file...',10, 0
 
 	esc_move_home db 0x1b, '[H', 0
 	esc_cursor_absolute_position db 0x1b, '[', 250 dup(0)  ;'[#;#H' string format
@@ -36,6 +37,7 @@ section .data
 	cursor_line db 1, 7 dup(0)
 	cursor_position_on_file db 8 dup(0)
 	first_write db 0 ;boolean for first write
+	trash_buffer db 50 ; 50 bytes of nothing for throwing trash
 
 	timeval:
 	tv_sec  dq 1
@@ -150,6 +152,8 @@ write_to_file:
 	.not_first_write:
 	mov rdi, [fd]
 	call reset_file_pointer_to_start
+	cmp rax, 0
+	jl .write_error
 	mov rax, 1
 	mov rdi, [fd]
 	mov rsi, [file_buffer_addr]
@@ -162,9 +166,16 @@ write_to_file:
 	.first_write:
 	mov rdi, [argv1]
 	call open_file_for_write
+	cmp rax, 0
+	jl .write_error
 	mov [fd], rax
 	mov byte [first_write], 1
 	jmp .not_first_write
+	.write_error:
+	mov rdi, err_writing_to_file
+	call render_error
+	ret
+
 
 paint_red:
 	mov rdi, esc_background_red
@@ -203,7 +214,6 @@ blink_screen_green:
 	call render_screen
 	ret
 	
-
 sleep: ; seconds on rax, ns on r12
 	mov qword [tv_sec], rax
 	mov qword [tv_nsec], r12
@@ -212,8 +222,6 @@ sleep: ; seconds on rax, ns on r12
 	xor rsi, rsi
 	syscall
 	ret
-
-
 
 insert_new_char_on_buffer: ;receive char to insert on rdi
 	push rdi
@@ -662,12 +670,15 @@ render_without_clean:
 	ret
 
 render_error: ;receives msg on rdi
+	mov r8, rdi
 	call clear_screen
-	push rdi
+	mov rdi, r8
 	call print_str
-	pop rsi
+	mov rdi, err_press_any_key
+	call print_str
+	mov rsi, trash_buffer
 	mov rdi, 1
-	mov rdx, 2
+	mov rdx, 10
 	call read_syscall
 	call render_screen
 	ret
