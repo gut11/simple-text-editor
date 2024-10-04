@@ -36,8 +36,9 @@ section .data
 	cursor_collum db 1 ,7 dup(0)
 	cursor_line db 1, 7 dup(0)
 	cursor_position_on_file db 8 dup(0)
-	first_write db 0 ;boolean for first write
 	trash_buffer db 50 ; 50 bytes of nothing for throwing trash
+
+	first_write db 0 ;boolean for first write
 
 	timeval:
 	tv_sec  dq 1
@@ -245,15 +246,31 @@ remove_char_from_buffer:
 
 key_press_handler: ;receive_input on rax
 	mov rax, current_key
-	cmp byte [rax], 0x13 ;ctrl bytes
-	je write_to_file
-	cmp byte [rax], 0x10 ;force refresh bytes
-	je force_refresh
 	cmp byte [rax], 0x1b ;ESC byte
 	je handle_arrows 
 	cmp byte [rax], 0x7f ;backspace that for some reason is del byte
 	je handle_backspace
+	cmp byte [rax], 0x13 ;ctrl-s byte
+	je write_to_file
+	cmp byte [rax], 0x9 ; handle tab
+	je handle_tab
+	cmp byte [rax], 0x10 ;force refresh bytes
+	je force_refresh
+	cmp byte [rax], 0x0a ;line_break
+	je handle_writable_char
+	cmp byte [rax], 0x20
+	jl .ret
+	cmp byte [rax], 0x7e
+	jg .ret
 	jmp handle_writable_char
+	.ret:
+	ret
+
+handle_tab:
+	mov byte [current_key], 0x20
+	call handle_writable_char
+	call handle_writable_char
+	ret
 
 force_refresh:
 	call render_screen
@@ -303,6 +320,28 @@ decrement_cursor: ;char on rax
 	je .ret
 	jmp .continue
 
+ret_minus_one_if_last_line: ;starts from addr on rdi
+	mov rsi, [file_buffer_addr]
+	add rsi, [file_buffer_used_bytes]
+	sub rsi, 1 ;because file_buffer_used_bytes is not an index
+	mov r10, 0
+
+	.loop:
+	cmp rdi, rsi
+	je .last_line
+	cmp byte [rdi], 10
+	je .not_last_line
+	add rdi, 1
+	add r10, 1
+	jmp .loop
+
+	.not_last_line:
+	mov byte al, 0
+	ret
+	.last_line:
+	mov byte al, -1
+	ret
+
 
 find_next_line_break: ;receive cursor_position_on_file on r9, return next line break addr on rax, distance from line_break in rsi,
 	mov rax, r9
@@ -335,6 +374,8 @@ find_next_line_break: ;receive cursor_position_on_file on r9, return next line b
 	ret
 
 	.treat_case_if_current_char_is_line_break:
+	cmp qword rax, rdi
+	je .ret_last_line
 	add rax, 1
 	add rsi, 1
 	jmp .loop
@@ -436,6 +477,7 @@ handle_arrows: ;;receive arrow on open bracket byte on rdi
 	je .right
 	cmp byte [rax], 'D'
 	je .left
+	jmp .ret
 	.up:
 	call handle_up
 	jmp .ret
@@ -485,10 +527,20 @@ handle_up:
 	.ret:
 	ret
 
+if_current_line_is_last:
+	call get_current_file_buffer_position
+	mov rdi, rax
+	call ret_minus_one_if_last_line
+	cmp byte al, -1
+	ret
+
 handle_down:
 	mov qword r9, [cursor_position_on_file]
-	cmp byte r9, [file_buffer_used_bytes]
+	cmp r9, [file_buffer_used_bytes]
 	je .ret
+
+	call if_current_line_is_last
+	je .treat_last_line
 
 	call find_next_line_break
 	mov r10, rsi ;store length from current_char to line break
@@ -497,7 +549,8 @@ handle_down:
 	add rax, r9
 
 	cmp byte [rax], 10
-	je .handle_case_where_current_char_is_line_break ;if current char is linebreak, next line break already is from the other line
+	je .handle_case_where_current_char_is_line_break ;if char is linebreak, next line break already is from the other line
+	cmp byte [rax], 10
 
 	add r9, rsi ;add from cursor position the length to next line break
 	call find_next_line_break ;returns on rsi with length from next line
@@ -522,16 +575,24 @@ handle_down:
 	add byte [cursor_line], 1
 	ret 
 
+	.move_after_line_break:
+	add [cursor_position_on_file], r10
+	add byte [cursor_line], 1
+	mov byte [cursor_collum], 1
+	add byte [cursor_position_on_file], 1
+	ret
+
+	.treat_last_line:
+	add r9, [file_buffer_addr]
+	add r9, r10
+	cmp byte [r9], 10
+	je .move_after_line_break
 	.ret:
 	ret
 
 	.handle_case_where_current_char_is_line_break:
 	mov r10, 0 ;because we are in the line break for the next line
 	mov rcx, [cursor_collum]
-	; call find_previous_line_break
-	; sub rsi, 1 ; -1 in the length because should not be length to last line break but to first char after line break
-	; sub r9, rsi
-	; mov rcx, r9 ; insert on rcx the length from current_line
 	jmp .cmp
 
 handle_right:
